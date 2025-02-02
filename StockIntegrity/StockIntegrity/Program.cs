@@ -2,27 +2,20 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore.Storage;
-using System;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Sinks.PostgreSQL;
 using StockIntegrity.Models;
+using StockIntegrity.Helpers;
 
 namespace StockIntegrity
 {
-    internal static class StockPriceLoader
+    internal static class StockIntegrity
     {
         private static IConfigurationBuilder builder = new ConfigurationBuilder()
                 .AddJsonFile("config.json", optional: false);
 
         private static IConfigurationRoot config = builder.Build();
-        //Alpaca API Keys
-        [Required]
-        private static readonly string API_KEY = config["API_KEY"];
-
-        [Required]
-        private static readonly string API_SECRET = config["API_SECRET"];
 
         [Required]
         private static readonly string APP_NAME = config["APP_NAME"];
@@ -33,6 +26,55 @@ namespace StockIntegrity
 
         public static async Task Main(string[] args)
         {
+
+            try
+            {
+                // Check if the connection string is already encrypted (simple Base64 check)
+                if (!EncryptionHelper.IsEncrypted(config.GetConnectionString("LoggingConnection")))
+                {
+
+                    string encryptedConnectionString = EncryptionHelper.Encrypt(config.GetConnectionString("LoggingConnection"));
+
+                    // Update config.json with the encrypted string
+                    EncryptionHelper.UpdateConfigFile(encryptedConnectionString, "ConnectionStrings:LoggingConnection");
+                }
+
+                // Check if the connection string is already encrypted (simple Base64 check)
+                if (!EncryptionHelper.IsEncrypted(config.GetConnectionString("AppConnection")))
+                {
+
+                    string encryptedConnectionString = EncryptionHelper.Encrypt(config.GetConnectionString("AppConnection"));
+
+                    // Update config.json with the encrypted string
+                    EncryptionHelper.UpdateConfigFile(encryptedConnectionString, "ConnectionStrings:AppConnection");
+                }
+                // Check if the connection string is already encrypted (simple Base64 check)
+                if (!EncryptionHelper.IsEncrypted(config["API_KEY"]))
+                {
+
+                    string encryptedConnectionString = EncryptionHelper.Encrypt(config["API_KEY"]);
+
+                    // Update config.json with the encrypted string
+                    EncryptionHelper.UpdateConfigFile(encryptedConnectionString, "API_KEY");
+                }
+                // Check if the connection string is already encrypted (simple Base64 check)
+                if (!EncryptionHelper.IsEncrypted(config["API_SECRET"]))
+                {
+
+                    string encryptedConnectionString = EncryptionHelper.Encrypt(config["API_SECRET"]);
+
+                    // Update config.json with the encrypted string
+                    EncryptionHelper.UpdateConfigFile(encryptedConnectionString, "API_SECRET");
+                }
+
+                config.Reload();
+            }
+            catch (Exception ex)
+            {
+
+            }
+
+
             Log.Information("App Started");
             //Logging for DB setup
             var columnOptions = new Dictionary<string, ColumnWriterBase>
@@ -48,7 +90,7 @@ namespace StockIntegrity
             // Configure Serilog
             Log.Logger = new LoggerConfiguration()
                 .Enrich.WithProperty("app_name", APP_NAME)
-                .WriteTo.PostgreSQL(config.GetConnectionString("LoggingConnection"), "logs", columnOptions, needAutoCreateTable: true)
+                .WriteTo.PostgreSQL(EncryptionHelper.Decrypt(config.GetConnectionString("LoggingConnection")), "logs", columnOptions, needAutoCreateTable: true)
                 .CreateLogger();
 
 
@@ -179,8 +221,8 @@ namespace StockIntegrity
                             try
                             {
                                 client.DefaultRequestHeaders.Add("Accept", "application/json");
-                                client.DefaultRequestHeaders.Add("APCA-API-KEY-ID", API_KEY);
-                                client.DefaultRequestHeaders.Add("APCA-API-SECRET-KEY", API_SECRET);
+                                client.DefaultRequestHeaders.Add("APCA-API-KEY-ID", EncryptionHelper.Decrypt(config["API_KEY"]));
+                                client.DefaultRequestHeaders.Add("APCA-API-SECRET-KEY", EncryptionHelper.Decrypt(config["API_SECRET"]));
 
                                 // Send GET request to the URL
                                 HttpResponseMessage response = await client.GetAsync(getLastPriceURL);
