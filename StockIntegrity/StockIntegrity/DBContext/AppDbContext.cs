@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using System.Reflection.Emit;
 using StockIntegrity.Models;
+using StockIntegrity.Helpers;
 public class AppDbContext : DbContext
 {
     private readonly IConfiguration _configuration;
@@ -16,7 +17,7 @@ public class AppDbContext : DbContext
     public DbSet<Company> Companies { get; set; }
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        var connectionString = _configuration.GetConnectionString("AppConnection");
+        var connectionString = EncryptionHelper.Decrypt(_configuration.GetConnectionString("AppConnection"));
         optionsBuilder.UseNpgsql(connectionString);  // Use PostgreSQL, as indicated
     }
 
