@@ -82,7 +82,7 @@ namespace StockIntegrity.Helpers
 
         public static void UpdateConfigFile(string encryptedConnectionString, string connStringName)
         {
-            string configFilePath = AppContext.BaseDirectory + "config.json";
+            string configFilePath = AppContext.BaseDirectory + "appsettings.json";
 
             // Read existing JSON content
             string jsonContent = File.ReadAllText(configFilePath);
