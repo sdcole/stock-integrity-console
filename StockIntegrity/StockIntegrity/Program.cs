@@ -129,7 +129,9 @@ namespace StockIntegrity
         // If there are more than one, it deletes the duplicates and adds new ones if necessary.
         public static async Task CheckDateDataIntegrity(DateTime date)
         {
+            string getLastPriceURL = @"https://data.alpaca.markets/v2/stocks/bars?timeframe=1D&start=" + date.ToString("yyyy-MM-dd") + "&end=" + date.ToString("yyyy-MM-dd") + "&limit=1000&adjustment=raw&feed=iex&currency=USD&sort=asc&symbols=";
             string tickers = "";
+            string apiGetReq = getLastPriceURL;
             foreach (Company company in companies)
             {
                 using (AppDbContext context = new AppDbContext(config))
@@ -153,67 +155,24 @@ namespace StockIntegrity
                     }
                     else
                     {
-                        // We need to add this to the list to insert
-                        tickers += company.Ticker + ",";
-                    }
-                }
-            }
-
-            if (!string.IsNullOrEmpty(tickers))
-            {
-                // Now that we have a list of companies to insert insert based on date
-                using (AppDbContext context = new AppDbContext(config))
-                {
-                    try
-                    {
-                        string getLastPriceURL = @"https://data.alpaca.markets/v2/stocks/bars?symbols=" + tickers;
-
-                        getLastPriceURL = getLastPriceURL.Substring(0, getLastPriceURL.Length - 1);
-                        getLastPriceURL += @"&timeframe=1D&start=" + date.ToString("yyyy-MM-dd") + "&end=" + date.ToString("yyyy-MM-dd") + "&limit=1000&adjustment=raw&feed=iex&currency=USD&sort=asc";
-
-                        using (HttpClient client = new HttpClient())
+                        //This makes sure we dont go over the 2048 character limit.
+                        if (apiGetReq.Length >= 2043)
                         {
-                            try
-                            {
-                                ConfigureHTTPClient(client);
-
-                                // Send GET request to the URL
-                                HttpResponseMessage response = await client.GetAsync(getLastPriceURL);
-                                string resp = await response.Content.ReadAsStringAsync();
-
-                                BarResponse bars = JsonSerializer.Deserialize<BarResponse>(resp);
-
-                                using (IDbContextTransaction transaction = context.Database.BeginTransaction())
-                                {
-                                    try
-                                    {
-                                        // Output some of the data
-                                        foreach (var bar in bars.bars)
-                                        {
-                                            context.DailyBars.Add(new BarData(bar.Key, bar.Value[0]));
-                                        }
-
-                                        context.SaveChanges();
-                                        transaction.Commit();
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        transaction.Rollback();
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"Error fetching stock data: {ex.Message}");
-                            }
+                            apiGetReq = apiGetReq.Substring(0, apiGetReq.Length - 1);
+                            CallApiAndLoadDailyData(apiGetReq);
+                            apiGetReq = getLastPriceURL;
+                        }
+                        else
+                        {
+                            apiGetReq += company.Ticker + ",";
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error processing tickers: {ex.Message}");
-                    }
                 }
+                apiGetReq = apiGetReq.Substring(0, apiGetReq.Length - 1);
+                CallApiAndLoadDailyData(apiGetReq);
             }
+
+
         }
 
 
@@ -245,6 +204,63 @@ namespace StockIntegrity
             client.DefaultRequestHeaders.Add("APCA-API-KEY-ID", EncryptionHelper.Decrypt(config["API_KEY"]));
             client.DefaultRequestHeaders.Add("APCA-API-SECRET-KEY", EncryptionHelper.Decrypt(config["API_SECRET"]));
         }
-    }
+
+
+
+        public static async Task CallApiAndLoadDailyData(string apiGetReq)
+        {
+            // Now that we have a list of companies to insert insert based on date
+            using (AppDbContext context = new AppDbContext(config))
+            {
+                try
+                {
+
+
+
+
+
+                    using (HttpClient client = new HttpClient())
+                    {
+                        try
+                        {
+                            ConfigureHTTPClient(client);
+
+                            // Send GET request to the URL
+                            HttpResponseMessage response = await client.GetAsync(apiGetReq);
+                            string resp = await response.Content.ReadAsStringAsync();
+
+                            BarResponse bars = JsonSerializer.Deserialize<BarResponse>(resp);
+
+                            using (IDbContextTransaction transaction = context.Database.BeginTransaction())
+                            {
+                                try
+                                {
+                                    // Output some of the data
+                                    foreach (var bar in bars.bars)
+                                    {
+                                        context.DailyBars.Add(new BarData(bar.Key, bar.Value[0]));
+                                    }
+
+                                    context.SaveChanges();
+                                    transaction.Commit();
+                                }
+                                catch (Exception ex)
+                                {
+                                    transaction.Rollback();
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error fetching stock data: {ex.Message}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error processing tickers: {ex.Message}");
+                }
+            }
+        }
 
 }
