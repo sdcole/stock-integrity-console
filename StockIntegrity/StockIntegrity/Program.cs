@@ -125,19 +125,18 @@ namespace StockIntegrity
             return DateTime.MinValue; // No more valid dates
         }
 
-        // This function ensures only one record for each ticker each day exists
+        // This function ensures only one record for each symbol each day exists
         // If there are more than one, it deletes the duplicates and adds new ones if necessary.
         public static async Task CheckDateDataIntegrity(DateTime date)
         {
             string getLastPriceURL = @"https://data.alpaca.markets/v2/stocks/bars?timeframe=1D&start=" + date.ToString("yyyy-MM-dd") + "&end=" + date.ToString("yyyy-MM-dd") + "&limit=1000&adjustment=raw&feed=iex&currency=USD&sort=asc&symbols=";
-            string tickers = "";
             string apiGetReq = getLastPriceURL;
             foreach (Company company in companies)
             {
                 using (AppDbContext context = new AppDbContext(config))
                 {
                     var records = context.DailyBars
-                        .Where(r => r.Timestamp.Date == date.Date && r.Symbol.Trim() == company.Ticker.Trim())
+                        .Where(r => r.Timestamp.Date == date.Date && r.Symbol.Trim() == company.Symbol.Trim())
                         .ToList();
 
                     if (records.Count == 1)
@@ -164,14 +163,14 @@ namespace StockIntegrity
                         }
                         else
                         {
-                            apiGetReq += company.Ticker + ",";
+                            apiGetReq += (company.Symbol + ",");
                         }
                     }
                 }
-                apiGetReq = apiGetReq.Substring(0, apiGetReq.Length - 1);
-                CallApiAndLoadDailyData(apiGetReq);
+                
             }
-
+            apiGetReq = apiGetReq.Substring(0, apiGetReq.Length - 1);
+            CallApiAndLoadDailyData(apiGetReq);
 
         }
 
@@ -258,7 +257,7 @@ namespace StockIntegrity
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error processing tickers: {ex.Message}");
+                    Console.WriteLine($"Error processing symbol: {ex.Message}");
                 }
             }
         }
