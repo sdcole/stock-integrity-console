@@ -37,7 +37,7 @@ namespace StockIntegrity
                 { "message", new RenderedMessageColumnWriter() },
                 { "message_template", new MessageTemplateColumnWriter() },
                 { "level", new LevelColumnWriter() },
-                { "time_stamp", new TimestampColumnWriter() },
+                { "timestamp", new TimestampColumnWriter() },
                 { "exception", new ExceptionColumnWriter() },
                 { "properties", new PropertiesColumnWriter() }
             };
