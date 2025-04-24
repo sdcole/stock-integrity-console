@@ -51,8 +51,8 @@ namespace StockIntegrity
 
             int count = 0;
             DateTime date = DateTime.UtcNow.Date;
-            // Integrity will check from the past 4 years
-            date = date.AddYears(-4);
+            // Integrity will check from the past 5 years
+            date = date.AddYears(-5);
 
 
 
