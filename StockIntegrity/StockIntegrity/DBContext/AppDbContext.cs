@@ -17,7 +17,7 @@ public class AppDbContext : DbContext
     public DbSet<Company> Companies { get; set; }
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        var connectionString = EncryptionHelper.Decrypt(_configuration.GetConnectionString("AppConnection"));
+        var connectionString = EncryptionService.Decrypt(_configuration.GetConnectionString("AppConnection"));
         optionsBuilder.UseNpgsql(connectionString);  // Use PostgreSQL, as indicated
     }
 

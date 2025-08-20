@@ -45,7 +45,7 @@ namespace StockIntegrity
             // Configure Serilog
             Log.Logger = new LoggerConfiguration()
                 .Enrich.WithProperty("app_name", APP_NAME)
-                .WriteTo.PostgreSQL(EncryptionHelper.Decrypt(config.GetConnectionString("LoggingConnection")), "logs", columnOptions, needAutoCreateTable: true)
+                .WriteTo.PostgreSQL(EncryptionService.Decrypt(config.GetConnectionString("LoggingConnection")), "logs", columnOptions, needAutoCreateTable: true)
                 .CreateLogger();
 
 
@@ -74,31 +74,9 @@ namespace StockIntegrity
             {
                 while (date < DateTime.UtcNow.Date.AddDays(-2))
                 {
-                    List<Task> runningTasks = new List<Task>();
-
-                    // Schedule up to 6 tasks
-                    for (int i = 0; i < 6; i++)
-                    {
-                        Console.WriteLine(date.ToString());
-                        DateTime nextDate = GetNextValidDate(ref date, DateTime.UtcNow.Date.AddDays(-2));
-                        if (nextDate == DateTime.MinValue)
-                            break; // Stop scheduling if no more valid dates
-
-                        Console.WriteLine($"Scheduled task for: {nextDate.ToShortDateString()}");
-
-                        // Add the task to the list without starting it yet
-                        runningTasks.Add(Task.Factory.StartNew(() => {
-                            CheckDateDataIntegrity(nextDate.Date);
-                            // Code to run in parallel
-                        }, TaskCreationOptions.LongRunning));
-                    }
-
-                    // If no tasks were scheduled, exit loop
-                    if (runningTasks.Count == 0)
-                        break;
-
-                    // Wait for all tasks to complete before continuing
-                    await Task.WhenAll(runningTasks);
+                    CheckDailyBars(date);
+                    CheckDailySummaryData(date);
+                    
                 }
             }
             catch (Exception ex)
@@ -109,7 +87,35 @@ namespace StockIntegrity
             Log.CloseAndFlush();
             
         }
+        public static async void CheckDailyBars(DateTime date)
+        {
+            List<Task> runningTasks = new List<Task>();
 
+            // Schedule up to 6 tasks
+            for (int i = 0; i < 6; i++)
+            {
+                Console.WriteLine(date.ToString());
+                DateTime nextDate = GetNextValidDate(ref date, DateTime.UtcNow.Date.AddDays(-2));
+                if (nextDate == DateTime.MinValue)
+                    break; // Stop scheduling if no more valid dates
+
+                Console.WriteLine($"Scheduled task for: {nextDate.ToShortDateString()}");
+
+                // Add the task to the list without starting it yet
+                runningTasks.Add(Task.Factory.StartNew(() => {
+                    CheckDateDataIntegrity(nextDate.Date);
+                    // Code to run in parallel
+                }, TaskCreationOptions.LongRunning));
+            }
+
+            // If no tasks were scheduled, exit loop
+            if (runningTasks.Count == 0)
+                return;
+
+            // Wait for all tasks to complete before continuing
+            await Task.WhenAll(runningTasks);
+            return;
+        }
         static DateTime GetNextValidDate(ref DateTime date, DateTime today)
         {
             while (date < today)
@@ -186,9 +192,9 @@ namespace StockIntegrity
             foreach (var key in keysToEncrypt)
             {
                 string value = config[key];
-                if (!EncryptionHelper.IsEncrypted(value))
+                if (!EncryptionService.IsEncrypted(value))
                 {
-                    EncryptionHelper.UpdateConfigFile(EncryptionHelper.Encrypt(value), key);
+                    EncryptionService.UpdateConfigFile(EncryptionService.Encrypt(value), key);
                 }
             }
             config.Reload();
@@ -201,8 +207,8 @@ namespace StockIntegrity
         private static void ConfigureHTTPClient(HttpClient client)
         {
             client.DefaultRequestHeaders.Add("Accept", "application/json");
-            client.DefaultRequestHeaders.Add("APCA-API-KEY-ID", EncryptionHelper.Decrypt(config["API_KEY"]));
-            client.DefaultRequestHeaders.Add("APCA-API-SECRET-KEY", EncryptionHelper.Decrypt(config["API_SECRET"]));
+            client.DefaultRequestHeaders.Add("APCA-API-KEY-ID", EncryptionService.Decrypt(config["API_KEY"]));
+            client.DefaultRequestHeaders.Add("APCA-API-SECRET-KEY", EncryptionService.Decrypt(config["API_SECRET"]));
         }
 
 
@@ -260,6 +266,50 @@ namespace StockIntegrity
                 {
                     Console.WriteLine($"Error processing tickers: {ex.Message}");
                 }
+            }
+        }
+
+        //TODO: Add daily summary data.
+        public static async Task CalculateDailySummary(DateTime date)
+        {
+            foreach (Company company in companies)
+            {
+                using (AppDbContext context = new AppDbContext(config))
+                {
+                    var records = context.DailySummaries
+                        .Where(r => r.Timestamp.Date == date.Date && r.Symbol.Trim() == company.Ticker.Trim())
+                        .ToList();
+
+                    if (records.Count == 1)
+                    {
+                        // Do nothing
+                    }
+                    else if (records.Count > 1)
+                    {
+                        // We need to delete until one remains as dupes were inserted
+                        for (int i = 1; i < records.Count; i++)
+                        {
+                            context.DailyBars.Remove(records[i]);
+                            context.SaveChanges();
+                        }
+                    }
+                    else
+                    {
+                        //This makes sure we dont go over the 2048 character limit.
+                        if (apiGetReq.Length >= 2043)
+                        {
+                            apiGetReq = apiGetReq.Substring(0, apiGetReq.Length - 1);
+                            CallApiAndLoadDailyData(apiGetReq);
+                            apiGetReq = getLastPriceURL;
+                        }
+                        else
+                        {
+                            apiGetReq += company.Ticker + ",";
+                        }
+                    }
+                }
+                apiGetReq = apiGetReq.Substring(0, apiGetReq.Length - 1);
+                CallApiAndLoadDailyData(apiGetReq);
             }
         }
     }
