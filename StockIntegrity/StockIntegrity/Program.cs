@@ -112,7 +112,7 @@ namespace StockIntegrity
             {
 
 
-                Console.WriteLine(date.ToString());
+
                 nextDate = GetNextValidDate(currDate, DateTime.UtcNow.Date.AddDays(-2));
                 if (nextDate == DateTime.MinValue)
                     break; // Stop scheduling if no more valid dates
@@ -139,9 +139,9 @@ namespace StockIntegrity
         {
             while (date < today)
             {
-                DateTime validDate = date;
+                
                 date = date.AddDays(1); // Move forward
-
+                DateTime validDate = date;
                 if (validDate.DayOfWeek != DayOfWeek.Saturday && validDate.DayOfWeek != DayOfWeek.Sunday)
                 {
                     return validDate; // Return the first valid weekday
