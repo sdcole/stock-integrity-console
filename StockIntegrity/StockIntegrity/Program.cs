@@ -74,8 +74,9 @@ namespace StockIntegrity
             {
                 while (date < DateTime.UtcNow.Date.AddDays(-2))
                 {
-                    CheckDailyBars(date);
-                    CheckDailySummary(date);
+                    date = await CheckDailyBars(date);
+                    //CheckDailySummary(date);
+                    await Task.Delay(5000);
                     
                 }
             }
@@ -87,15 +88,31 @@ namespace StockIntegrity
             Log.CloseAndFlush();
             
         }
-        public static async void CheckDailyBars(DateTime date)
+
+        /**
+         * CheckDailyBars
+         * 
+         * This function is the thread manager for the app. It will kick off 6 parallel threads one for each date.
+         * It manages only 6 threads at a time to not interfere with api limits.
+         * It waits till all have completed before continuing to prevent any leaks.
+         * 
+         * 
+         * 
+         * 
+         * 
+         **/
+        public static async Task<DateTime> CheckDailyBars(DateTime date)
         {
             List<Task> runningTasks = new List<Task>();
-
+            DateTime nextDate = new DateTime();
             // Schedule up to 6 tasks
+     
             for (int i = 0; i < 6; i++)
             {
+
+
                 Console.WriteLine(date.ToString());
-                DateTime nextDate = GetNextValidDate(ref date, DateTime.UtcNow.Date.AddDays(-2));
+                nextDate = GetNextValidDate(date, DateTime.UtcNow.Date.AddDays(-2));
                 if (nextDate == DateTime.MinValue)
                     break; // Stop scheduling if no more valid dates
 
@@ -107,16 +124,16 @@ namespace StockIntegrity
                     // Code to run in parallel
                 }, TaskCreationOptions.LongRunning));
             }
-
+            
             // If no tasks were scheduled, exit loop
             if (runningTasks.Count == 0)
-                return;
+                return nextDate;
 
             // Wait for all tasks to complete before continuing
             await Task.WhenAll(runningTasks);
-            return;
+            return nextDate;
         }
-        static DateTime GetNextValidDate(ref DateTime date, DateTime today)
+        static DateTime GetNextValidDate(DateTime date, DateTime today)
         {
             while (date < today)
             {
@@ -131,55 +148,100 @@ namespace StockIntegrity
             return DateTime.MinValue; // No more valid dates
         }
 
-        // This function ensures only one record for each ticker each day exists
-        // If there are more than one, it deletes the duplicates and adds new ones if necessary.
+        /**
+         * CheckDateDataIntegrity
+         * This function ensures only one record for each ticker each day exists
+         * 
+         * If there are more than one, it deletes the duplicates and adds new ones if necessary.
+         * If none are found it will build a Get request for the API including the symbol for that date.
+         * 
+         * 
+         **/
         public static async Task CheckDateDataIntegrity(DateTime date)
         {
-            string getLastPriceURL = @"https://data.alpaca.markets/v2/stocks/bars?timeframe=1D&start=" + date.ToString("yyyy-MM-dd") + "&end=" + date.ToString("yyyy-MM-dd") + "&limit=1000&adjustment=raw&feed=iex&currency=USD&sort=asc&symbols=";
-            string tickers = "";
-            string apiGetReq = getLastPriceURL;
-            foreach (Company company in companies)
-            {
-                using (AppDbContext context = new AppDbContext(config))
-                {
-                    var records = context.DailyBars
-                        .Where(r => r.Timestamp.Date == date.Date && r.Symbol.Trim() == company.Symbol.Trim())
-                        .ToList();
+            string baseUrl = @"https://data.alpaca.markets/v2/stocks/bars?timeframe=1D&start="
+                + date.ToString("yyyy-MM-dd")
+                + "&end=" + date.ToString("yyyy-MM-dd")
+                + "&limit=1000&adjustment=raw&feed=iex&currency=USD&sort=asc&symbols=";
 
-                    if (records.Count == 1)
-                    {
-                        // Do nothing
-                    }
-                    else if (records.Count > 1)
-                    {
-                        // We need to delete until one remains as dupes were inserted
-                        for (int i = 1; i < records.Count; i++)
-                        {
-                            context.DailyBars.Remove(records[i]);
-                            context.SaveChanges();
-                        }
-                    }
-                    else
-                    {
-                        //This makes sure we dont go over the 2048 character limit.
-                        if (apiGetReq.Length >= 2043)
-                        {
-                            apiGetReq = apiGetReq.Substring(0, apiGetReq.Length - 1);
-                            CallApiAndLoadDailyData(apiGetReq);
-                            apiGetReq = getLastPriceURL;
-                        }
-                        else
-                        {
-                            apiGetReq += company.Symbol + ",";
-                        }
-                    }
-                }
-                apiGetReq = apiGetReq.Substring(0, apiGetReq.Length - 1);
-                CallApiAndLoadDailyData(apiGetReq);
+            using var context = new AppDbContext(config);
+
+            //TODO
+            //Steps are as follows:
+            //1. Get counts per symbol for this date
+            //2. Cleanup duplicates
+            //3. Determine missing symbols
+            //4. Fetch missing via API (batched under 2048 char limit)
+            
+            // --- Step 1: Get counts per symbol for this date
+            var symbolGroups = await context.DailyBars
+                .Where(r => r.Timestamp.Date == date.Date)
+                .GroupBy(r => r.Symbol.Trim())
+                .Select(g => new { Symbol = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var goodSymbols = symbolGroups
+                .Where(g => g.Count == 1)
+                .Select(g => g.Symbol)
+                .ToHashSet();
+
+            var duplicateSymbols = symbolGroups
+                .Where(g => g.Count > 1)
+                .Select(g => g.Symbol)
+                .ToHashSet();
+
+            // --- Step 2: Cleanup duplicates
+            foreach (var dup in duplicateSymbols)
+            {
+                var extras = await context.DailyBars
+                    .Where(r => r.Timestamp.Date == date.Date && r.Symbol.Trim() == dup)
+                    .OrderBy(r => r.Timestamp) // keep the first one
+                    .Skip(1)
+                    .ToListAsync();
+
+                context.DailyBars.RemoveRange(extras);
             }
 
+            // --- Step 3: Determine missing symbols
+            var allSymbols = companies
+                .Select(c => c.Symbol.Trim())
+                .ToHashSet();
 
+            var missingSymbols = allSymbols
+                .Except(goodSymbols)
+                .Except(duplicateSymbols)
+                .ToList();
+
+            // --- Step 4: Fetch missing via API (batched under 2048 char limit)
+            if (missingSymbols.Any())
+            {
+                var apiReq = baseUrl;
+
+                foreach (var symbol in missingSymbols)
+                {
+                    if ((apiReq + symbol + ",").Length >= 2043)
+                    {
+                        // finalize current batch
+                        apiReq = apiReq.TrimEnd(',');
+                        CallApiAndLoadDailyData(apiReq);
+                        apiReq = baseUrl;
+                    }
+
+                    apiReq += symbol + ",";
+                }
+
+                if (apiReq != baseUrl)
+                {
+                    apiReq = apiReq.TrimEnd(',');
+                    CallApiAndLoadDailyData(apiReq);
+                }
+            }
+
+            // --- Step 5: Commit cleanup deletes
+            await context.SaveChangesAsync();
         }
+
+
 
 
         /***
@@ -212,7 +274,14 @@ namespace StockIntegrity
         }
 
 
-
+        /**
+         * CallApiAndLoadDailyData
+         * 
+         * This function will take an api get request, make the get call, parse the json response, then lastly add and save to db.
+         * 
+         * 
+         * 
+         **/
         public static async Task CallApiAndLoadDailyData(string apiGetReq)
         {
             // Now that we have a list of companies to insert insert based on date
@@ -236,23 +305,29 @@ namespace StockIntegrity
                             string resp = await response.Content.ReadAsStringAsync();
 
                             BarResponse bars = JsonSerializer.Deserialize<BarResponse>(resp);
-
-                            using (IDbContextTransaction transaction = context.Database.BeginTransaction())
+                            if (bars.bars.Count == 0)
                             {
-                                try
+                                Log.Information("API Returned no records for call: " + apiGetReq);
+                            }
+                            else
+                            {
+                                using (IDbContextTransaction transaction = context.Database.BeginTransaction())
                                 {
-                                    // Output some of the data
-                                    foreach (var bar in bars.bars)
+                                    try
                                     {
-                                        context.DailyBars.Add(new BarData(bar.Key, bar.Value[0]));
-                                    }
+                                        // Output some of the data
+                                        foreach (var bar in bars.bars)
+                                        {
+                                            context.DailyBars.Add(new BarData(bar.Key, bar.Value[0]));
+                                        }
 
-                                    context.SaveChanges();
-                                    transaction.Commit();
-                                }
-                                catch (Exception ex)
-                                {
-                                    transaction.Rollback();
+                                        context.SaveChanges();
+                                        transaction.Commit();
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        transaction.Rollback();
+                                    }
                                 }
                             }
                         }
@@ -269,49 +344,62 @@ namespace StockIntegrity
             }
         }
 
-
+        /**
+         * CheckDailySummary
+         * 
+         * This function is to be used to track daily summary data (how the stock did for the day, recent data, etc..).
+         * 
+         * 
+         **/
         public static async Task CheckDailySummary(DateTime date)
         {
-
-            foreach (Company company in companies)
+            try
             {
-                using (AppDbContext context = new AppDbContext(config))
+                foreach (Company company in companies)
                 {
-                    var records = context.SymbolDailySummaries
-                        .Where(r => r.Date.Date == date.Date && r.Symbol.Trim() == company.Symbol.Trim())
-                        .ToList();
+                    using (AppDbContext context = new AppDbContext(config))
+                    {
+                        var records = context.SymbolDailySummaries
+                            .Where(r => r.Date.Date == date.Date && r.Symbol.Trim() == company.Symbol.Trim())
+                            .ToList();
 
-                    if (records.Count == 1)
-                    {
-                        // Do nothing
-                    }
-                    else if (records.Count > 1)
-                    {
-                        // We need to delete until one remains as dupes were inserted
-                        for (int i = 1; i < records.Count; i++)
+                        if (records.Count == 1)
                         {
-                            context.SymbolDailySummaries.Remove(records[i]);
-                            context.SaveChanges();
+                            // Do nothing
                         }
-                    }
-                    else
-                    {
-                        //We have figured out that there is not a symbol daily summary for the current day for the given company.
-                        //Now we can start calculating the values based on the bar data.
-                        SymbolDailySummary symbolDailySummary = await CalculateDailySummaryForSymbol(records[0].Symbol);
-
-                        if (symbolDailySummary != null)
+                        else if (records.Count > 1)
                         {
-                            context.SymbolDailySummaries.Add(symbolDailySummary);
-                            context.SaveChanges();
+                            // We need to delete until one remains as dupes were inserted
+                            for (int i = 1; i < records.Count; i++)
+                            {
+                                context.SymbolDailySummaries.Remove(records[i]);
+                                context.SaveChanges();
+                            }
                         }
                         else
                         {
-                            //Do nothing as we do not have a valid object to insert.
-                        }
+                            //We have figured out that there is not a symbol daily summary for the current day for the given company.
+                            //Now we can start calculating the values based on the bar data.
+                            SymbolDailySummary symbolDailySummary = await CalculateDailySummaryForSymbol(records[0].Symbol);
 
+                            if (symbolDailySummary != null)
+                            {
+                                context.SymbolDailySummaries.Add(symbolDailySummary);
+                                context.SaveChanges();
+                            }
+                            else
+                            {
+                                //Do nothing as we do not have a valid object to insert.
+                            }
+
+                        }
                     }
                 }
+            
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Error processing the SymbolDailySummaries");
             }
             
         }
