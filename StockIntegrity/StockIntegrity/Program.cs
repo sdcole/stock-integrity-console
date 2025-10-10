@@ -104,15 +104,16 @@ namespace StockIntegrity
         public static async Task<DateTime> CheckDailyBars(DateTime date)
         {
             List<Task> runningTasks = new List<Task>();
+            DateTime currDate = date;
             DateTime nextDate = new DateTime();
             // Schedule up to 6 tasks
-     
+
             for (int i = 0; i < 6; i++)
             {
 
 
                 Console.WriteLine(date.ToString());
-                nextDate = GetNextValidDate(date, DateTime.UtcNow.Date.AddDays(-2));
+                nextDate = GetNextValidDate(currDate, DateTime.UtcNow.Date.AddDays(-2));
                 if (nextDate == DateTime.MinValue)
                     break; // Stop scheduling if no more valid dates
 
@@ -123,6 +124,7 @@ namespace StockIntegrity
                     CheckDateDataIntegrity(nextDate.Date);
                     // Code to run in parallel
                 }, TaskCreationOptions.LongRunning));
+                currDate = nextDate;
             }
             
             // If no tasks were scheduled, exit loop
