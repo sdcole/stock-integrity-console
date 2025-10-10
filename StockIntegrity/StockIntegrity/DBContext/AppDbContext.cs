@@ -15,9 +15,10 @@ public class AppDbContext : DbContext
 
     public DbSet<BarData> DailyBars { get; set; }  // Add this DbSet for BarData
     public DbSet<Company> Companies { get; set; }
+    public DbSet<SymbolDailySummary> SymbolDailySummaries { get; set; }
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        var connectionString = EncryptionHelper.Decrypt(_configuration.GetConnectionString("AppConnection"));
+        var connectionString = EncryptionService.Decrypt(_configuration.GetConnectionString("AppConnection"));
         optionsBuilder.UseNpgsql(connectionString);  // Use PostgreSQL, as indicated
     }
 
@@ -46,10 +47,9 @@ public class AppDbContext : DbContext
             .IsRequired();
 
         modelBuilder.Entity<Company>()
-            .Property(c => c.Sector)
-            .HasColumnName("sector")
-            .IsRequired()
-            .HasMaxLength(100);
+            .Property(c => c.SectorId)
+            .HasColumnName("sector_id")
+            .IsRequired();
 
 
         // Configure BarData entity
@@ -111,5 +111,26 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<BarData>()
             .HasIndex(b => new { b.Symbol, b.Timestamp })
             .IsUnique();
+
+
+        modelBuilder.Entity<SymbolDailySummary>().ToTable("symbol_daily_summaries");
+
+        modelBuilder.Entity<SymbolDailySummary>()
+            .Property(s => s.Id).HasColumnName("id").IsRequired();
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Symbol)
+            .HasColumnName("symbol")
+            .IsRequired()
+            .HasMaxLength(10);
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Date).HasColumnName("date").IsRequired();
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Return1d).HasColumnName("return_1d");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Return5d).HasColumnName("return_5d");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Volatility5d).HasColumnName("volatility_5d");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Volatility10d).HasColumnName("volatility_10d");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Sma5).HasColumnName("sma_5");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Sma10).HasColumnName("sma_10");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.Rsi14).HasColumnName("rsi_14");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.BollingerBandwidth).HasColumnName("bollinger_bandwidth");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.VolumeAvg5d).HasColumnName("volume_avg_5d");
+        modelBuilder.Entity<SymbolDailySummary>().Property(s => s.VolumeRatio).HasColumnName("volume_ratio");
     }
 }

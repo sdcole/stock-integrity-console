@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace StockIntegrity.Helpers
 {
-    public static class EncryptionHelper
+    public static class EncryptionService
     {
         [Required]
         private static readonly string keyEnvVar = Environment.GetEnvironmentVariable("AES_ENCRYPTION_KEY");
