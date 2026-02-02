@@ -176,8 +176,12 @@ namespace StockIntegrity
             //4. Fetch missing via API (batched under 2048 char limit)
             
             // --- Step 1: Get counts per symbol for this date
+            // Use explicit UTC date range to avoid timezone conversion issues
+            var startOfDay = date.Date;
+            var endOfDay = date.Date.AddDays(1);
+
             var symbolGroups = await context.DailyBars
-                .Where(r => r.Timestamp.Date == date.Date)
+                .Where(r => r.Timestamp >= startOfDay && r.Timestamp < endOfDay)
                 .GroupBy(r => r.Symbol.Trim())
                 .Select(g => new { Symbol = g.Key, Count = g.Count() })
                 .ToListAsync();
@@ -196,7 +200,7 @@ namespace StockIntegrity
             foreach (var dup in duplicateSymbols)
             {
                 var extras = await context.DailyBars
-                    .Where(r => r.Timestamp.Date == date.Date && r.Symbol.Trim() == dup)
+                    .Where(r => r.Timestamp >= startOfDay && r.Timestamp < endOfDay && r.Symbol.Trim() == dup)
                     .OrderBy(r => r.Timestamp) // keep the first one
                     .Skip(1)
                     .ToListAsync();
