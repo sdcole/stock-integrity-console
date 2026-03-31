@@ -21,6 +21,7 @@ namespace StockIntegrity
         private static readonly string APP_NAME = config["APP_NAME"];
 
         public static List<Company> companies = null;
+        private static readonly HttpClient _httpClient = new HttpClient();
 
 
 
@@ -68,6 +69,8 @@ namespace StockIntegrity
                     Log.Fatal(ex, "Could not retrieve the companies list from the companies table.");
                 }
             }
+
+            ConfigureHTTPClient();
 
             Log.Information("Beginning to look at data integrity. Starting at Date: " + date.ToString());
             try
@@ -272,11 +275,11 @@ namespace StockIntegrity
          * This function adds the required request headers to the HTTP Client to allow for api calls.
          * 
          */
-        private static void ConfigureHTTPClient(HttpClient client)
+        private static void ConfigureHTTPClient()
         {
-            client.DefaultRequestHeaders.Add("Accept", "application/json");
-            client.DefaultRequestHeaders.Add("APCA-API-KEY-ID", EncryptionService.Decrypt(config["API_KEY"]));
-            client.DefaultRequestHeaders.Add("APCA-API-SECRET-KEY", EncryptionService.Decrypt(config["API_SECRET"]));
+            _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+            _httpClient.DefaultRequestHeaders.Add("APCA-API-KEY-ID", EncryptionService.Decrypt(config["API_KEY"]));
+            _httpClient.DefaultRequestHeaders.Add("APCA-API-SECRET-KEY", EncryptionService.Decrypt(config["API_SECRET"]));
         }
 
 
@@ -300,47 +303,42 @@ namespace StockIntegrity
 
 
 
-                    using (HttpClient client = new HttpClient())
+                    try
                     {
-                        try
+                        // Send GET request to the URL
+                        HttpResponseMessage response = await _httpClient.GetAsync(apiGetReq);
+                        string resp = await response.Content.ReadAsStringAsync();
+
+                        BarResponse bars = JsonSerializer.Deserialize<BarResponse>(resp);
+                        if (bars.bars.Count == 0)
                         {
-                            ConfigureHTTPClient(client);
-
-                            // Send GET request to the URL
-                            HttpResponseMessage response = await client.GetAsync(apiGetReq);
-                            string resp = await response.Content.ReadAsStringAsync();
-
-                            BarResponse bars = JsonSerializer.Deserialize<BarResponse>(resp);
-                            if (bars.bars.Count == 0)
+                            Log.Information("API Returned no records for call: " + apiGetReq);
+                        }
+                        else
+                        {
+                            using (IDbContextTransaction transaction = context.Database.BeginTransaction())
                             {
-                                Log.Information("API Returned no records for call: " + apiGetReq);
-                            }
-                            else
-                            {
-                                using (IDbContextTransaction transaction = context.Database.BeginTransaction())
+                                try
                                 {
-                                    try
+                                    // Output some of the data
+                                    foreach (var bar in bars.bars)
                                     {
-                                        // Output some of the data
-                                        foreach (var bar in bars.bars)
-                                        {
-                                            context.DailyBars.Add(new BarData(bar.Key, bar.Value[0]));
-                                        }
+                                        context.DailyBars.Add(new BarData(bar.Key, bar.Value[0]));
+                                    }
 
-                                        context.SaveChanges();
-                                        transaction.Commit();
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        transaction.Rollback();
-                                    }
+                                    context.SaveChanges();
+                                    transaction.Commit();
+                                }
+                                catch (Exception ex)
+                                {
+                                    transaction.Rollback();
                                 }
                             }
                         }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Error fetching stock data: {ex.Message}");
-                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error fetching stock data: {ex.Message}");
                     }
                 }
                 catch (Exception ex)
