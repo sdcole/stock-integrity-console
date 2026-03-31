@@ -123,10 +123,9 @@ namespace StockIntegrity
                 Console.WriteLine($"Scheduled task for: {nextDate.ToShortDateString()}");
 
                 // Add the task to the list without starting it yet
-                runningTasks.Add(Task.Factory.StartNew(() => {
-                    CheckDateDataIntegrity(nextDate.Date);
-                    // Code to run in parallel
-                }, TaskCreationOptions.LongRunning));
+                runningTasks.Add(Task.Factory.StartNew(async () => {
+                    await CheckDateDataIntegrity(nextDate.Date);
+                }, TaskCreationOptions.LongRunning).Unwrap());
                 currDate = nextDate;
             }
             
@@ -232,7 +231,7 @@ namespace StockIntegrity
                     {
                         // finalize current batch
                         apiReq = apiReq.TrimEnd(',');
-                        CallApiAndLoadDailyData(apiReq);
+                        await CallApiAndLoadDailyData(apiReq);
                         apiReq = baseUrl;
                     }
 
@@ -242,7 +241,7 @@ namespace StockIntegrity
                 if (apiReq != baseUrl)
                 {
                     apiReq = apiReq.TrimEnd(',');
-                    CallApiAndLoadDailyData(apiReq);
+                    await CallApiAndLoadDailyData(apiReq);
                 }
             }
 
